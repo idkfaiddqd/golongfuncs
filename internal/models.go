@@ -18,6 +18,7 @@ type CmdParams struct {
 	Ignore        *regexp.Regexp
 	IgnoreFuncs   *regexp.Regexp
 	Verbose       bool
+	CsvFileName   string
 }
 
 func (cp CmdParams) Printf(s string, i ...interface{}) {

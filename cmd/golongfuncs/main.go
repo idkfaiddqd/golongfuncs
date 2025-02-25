@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"os"
@@ -39,6 +40,7 @@ func main() {
 	flag.StringVar(&ignoreFilesRegexp, "ignore", "", "Regexp for files/directories to ignore")
 	flag.StringVar(&ignoreFuncsRegexp, "ignore-func", "", "Regexp for functions to ignore")
 	flag.BoolVar(&params.Verbose, "verbose", false, "Verbose")
+	flag.StringVar(&params.CsvFileName, "csv", "", "Write result to csv file with given name")
 	flag.Parse()
 
 	paths := flag.Args()
@@ -52,7 +54,8 @@ func main() {
 
 	prepareParams(&params, types, ignoreFilesRegexp, ignoreFuncsRegexp)
 	stats := internal.Do(params, paths)
-	printStats(params, stats)
+
+	report(params, stats)
 }
 
 func prepareParams(params *internal.CmdParams, types, ignoreFilesRegexp, ignoreFuncsRegexp string) {
@@ -113,4 +116,69 @@ func shortenTo(str string, l int) string {
 func printSingleStat(ty internal.FuncMeasurement, val float64) {
 	format := fmt.Sprintf("%%%ds", len(string(ty))+8)
 	fmt.Printf(format, fmt.Sprintf("%s=%.1f", ty, val))
+}
+
+func report(params internal.CmdParams, stats []internal.FunctionStats) {
+	switch {
+	case params.CsvFileName != "":
+		err := writeStatsToCsv(params, stats)
+		if err != nil {
+			fmt.Printf("Can not do this because of %s", err)
+			return
+		}
+
+	default:
+		printStats(params, stats)
+	}
+}
+
+func writeStatsToCsv(params internal.CmdParams, stats []internal.FunctionStats) error {
+	csvFile, err := os.Create(params.CsvFileName)
+	if err != nil {
+		return fmt.Errorf("os.Create err: %w", err)
+	}
+
+	defer csvFile.Close()
+
+	csvWriter := csv.NewWriter(csvFile)
+	defer csvWriter.Flush()
+
+	header := []string{"FuncWithRecv", "Location"}
+
+	for _, statName := range params.Types {
+		header = append(header, string(statName))
+	}
+
+	csvWriter.Write(header)
+
+	count := 0
+
+	for _, st := range stats {
+		csvRecord := []string{}
+
+		val, err := st.Get(params.Types[0])
+		if err != nil {
+			return fmt.Errorf("invalid type %s", params.Types[0])
+		}
+
+		lines, _ := st.Get(internal.Lines)
+
+		if val >= params.Threshold && int(lines) >= params.MinLines {
+			csvRecord = append(csvRecord, st.FuncWithRecv(), st.Location)
+
+			for i := range params.Types {
+				val, _ := st.Get(params.Types[i])
+				csvRecord = append(csvRecord, fmt.Sprintf("%.1f", val))
+			}
+
+			count += 1
+			csvWriter.Write(csvRecord)
+		}
+
+		if count >= params.Top {
+			return nil
+		}
+	}
+
+	return nil
 }
